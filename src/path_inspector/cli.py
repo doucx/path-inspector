@@ -70,6 +70,10 @@ def main(
         Optional[List[str]], 
         typer.Option("-e", "--extension", help="提取指定扩展名文件的内容 (如 'py')。")
     ] = None,
+    read_all: Annotated[
+        bool, 
+        typer.Option("--read-all", help="读取所有通过过滤的文件的内容 (覆盖 -e 选项)。")
+    ] = False,
     add_metadata: Annotated[
         bool, 
         typer.Option("--add-metadata", help="包含文件大小和修改时间。")
@@ -131,6 +135,7 @@ def main(
         max_depth=max_depth,
         no_gitignore=no_gitignore,
         extensions=extension,
+        read_all=read_all,
         add_metadata=add_metadata,
         head=head,
         tail=tail

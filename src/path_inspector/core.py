@@ -49,6 +49,7 @@ class Inspector:
         max_depth: Optional[int] = None,
         no_gitignore: bool = False,
         extensions: List[str] = None,
+        read_all: bool = False,
         add_metadata: bool = False,
         head: int = 0,
         tail: int = 0
@@ -59,9 +60,21 @@ class Inspector:
         self.max_depth = max_depth
         self.use_gitignore = not no_gitignore
         self.extensions = {f".{e.lstrip('.')}" for e in (extensions or [])}
+        self.read_all = read_all
         self.add_metadata = add_metadata
         self.head = head
         self.tail = tail
+
+    def _should_read_content(self, path: Path) -> bool:
+        """
+        决策是否应该读取文件内容。
+        优先级框架:
+        1. read_all (强制读取所有)
+        2. extensions (扩展名白名单)
+        """
+        if self.read_all:
+            return True
+        return path.suffix in self.extensions
 
     def inspect(self, paths: List[Path]) -> List[FileNode]:
         results = []
@@ -126,7 +139,7 @@ class Inspector:
                 logger.warning(f"无法获取元数据 {path}: {e}")
 
         # 内容读取
-        if path.suffix in self.extensions:
+        if self._should_read_content(path):
             self._read_content(node)
 
         return node

@@ -89,6 +89,7 @@ Options:
 
 内容提取选项:
   -e, --extension TEXT    提取指定扩展名文件的内容 (如 'py')。
+  --read-all              读取所有通过过滤的文件的内容 (覆盖 -e 选项)。
   --add-metadata          包含文件大小和修改时间。
   -n, --head INTEGER      仅读取文件的前 N 行。
   -t, --tail INTEGER      仅读取文件的后 N 行 (与 --head 互斥)。

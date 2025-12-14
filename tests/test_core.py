@@ -78,3 +78,51 @@ def test_head_tail_logic(tmp_path):
     inspector_tail = Inspector(extensions=["txt"], tail=2)
     node_tail = inspector_tail.inspect([f])[0]
     assert node_tail.content == "line 9\nline 10\n"
+
+def test_read_all_strategy(temp_workspace):
+    """测试 --read-all 策略的优先级"""
+    # 场景: 
+    # 1. 开启 read_all
+    # 2. 同时指定 extensions=['py'] (应该被 read_all 覆盖)
+    # 3. 期望读取到 main.py (在 extensions 中) 和 README.md (不在 extensions 中)
+    # 4. 期望 output.bin 仍然被跳过 (二进制检查在 _read_content 内部，不受此标志强制)
+    
+    # 注意: output.bin 在 build/ 下，默认被 .gitignore 忽略。
+    # 为了测试二进制检查，我们需要显式允许 build/ 或者创建一个不在 gitignore 中的二进制文件。
+    # 这里我们在 src 下创建一个临时的二进制文件
+    (temp_workspace / "src" / "binary.dat").write_bytes(b"\x00\x00")
+
+    inspector = Inspector(
+        extensions=["py"], 
+        read_all=True,
+        no_gitignore=True # 简化环境，聚焦于内容读取逻辑
+    )
+    results = inspector.inspect([temp_workspace])
+    root = results[0]
+    
+    def find_content(node, name):
+        if node.name == name: return node.content
+        for child in node.children:
+            res = find_content(child, name)
+            if res is not None: return res
+        return None
+
+    # 1. 验证扩展名白名单内的文件
+    assert find_content(root, "main.py") is not None
+    
+    # 2. 验证扩展名白名单外的文件 (README.md) - 应该被读取
+    assert find_content(root, "README.md") is not None
+    
+    # 3. 验证二进制文件 - 应该为 None (被 _read_content 内部逻辑跳过)
+    # 注意：find_content 返回 None 可能意味着没找到文件或者 content 为 None
+    # 我们可以确认文件节点存在但 content 为 None
+    def find_node(node, name):
+        if node.name == name: return node
+        for child in node.children:
+            res = find_node(child, name)
+            if res: return res
+        return None
+        
+    bin_node = find_node(root, "binary.dat")
+    assert bin_node is not None
+    assert bin_node.content is None
