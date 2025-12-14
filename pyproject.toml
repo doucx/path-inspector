@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "path-inspector"
+version = "0.1.0"
+description = "一个统一的文件系统检查、遍历和内容提取工具。"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [
+    { name = "ACA Archtitect", email = "aca@example.com" },
+]
+dependencies = [
+    "typer>=0.9.0",
+]
+
+[project.scripts]
+path-inspector = "path_inspector.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/path_inspector"]
