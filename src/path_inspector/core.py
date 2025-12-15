@@ -19,8 +19,8 @@ class FileNode:
     def to_dict(self, compact: bool = False, is_root: bool = False) -> Dict[str, Any]:
         """转换为字典格式，用于 JSON 序列化"""
         
-        # 决定显示的名称：根节点使用 relative_path (如 . 或 src)，子节点使用 name (basename)
-        display_name = self.relative_path if is_root else self.name
+        # 决定显示的名称：根节点统一使用 '.'，因为它表示其绝对路径已在元数据中给出。
+        display_name = "." if is_root else self.name
         
         if compact:
             # 紧凑模式: n (name), c (children), content (可选)

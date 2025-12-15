@@ -6,7 +6,7 @@ from typing import List, Optional
 from typing_extensions import Annotated
 from .core import Inspector
 from .renderers import get_renderer
-from .utils import setup_logging, logger
+from .utils import setup_logging, logger, find_git_root
 
 app = typer.Typer(
     help="一个强大的文件系统检查工具，支持多种格式输出 (XML, JSON, Show)。",
@@ -159,14 +159,30 @@ def main(
     # 渲染输出
     renderer = get_renderer(format)
 
+    # 准备元数据
+    # 绝对路径应该指向第一个被扫描路径的绝对位置，而不是 CWD，以消除歧义。
+    if resolved_paths:
+        path_for_metadata = resolved_paths[0]
+        absolute_path_meta = str(path_for_metadata.resolve())
+        git_root = find_git_root(path_for_metadata)
+    else:
+        # Fallback
+        absolute_path_meta = str(Path.cwd())
+        git_root = find_git_root(Path.cwd())
+
+    render_kwargs = {
+        "absolute_path": absolute_path_meta,
+        "repository_root": str(git_root) if git_root else None,
+    }
+
     try:
         if output:
             with open(output, "w", encoding="utf-8") as f:
-                renderer.render(nodes, f)
+                renderer.render(nodes, f, **render_kwargs)
             if not quiet:
                 typer.secho(f"结果已写入: {output}", fg=typer.colors.GREEN)
         else:
-            renderer.render(nodes, sys.stdout)
+            renderer.render(nodes, sys.stdout, **render_kwargs)
     except Exception as e:
         logger.error(f"生成输出时发生错误: {e}")
         raise typer.Exit(1)
