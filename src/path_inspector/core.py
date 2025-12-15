@@ -97,15 +97,64 @@ class Inspector:
             return True
         return path.suffix in self.extensions
 
+    def _sort_children_recursive(self, node: FileNode):
+        """递归排序子节点以确保输出稳定"""
+        if not node.is_dir:
+            return
+        node.children.sort(key=lambda p: (not p.is_dir, p.name.lower()))
+        for child in node.children:
+            self._sort_children_recursive(child)
+
+    def _ensure_dir_exists(
+        self,
+        dir_path: Path,
+        base_path: Path,
+        cache: Dict[Path, FileNode],
+    ) -> FileNode:
+        """递归地确保从 base_path 到 dir_path 的所有目录节点都已创建并存在于缓存中"""
+        if dir_path in cache:
+            return cache[dir_path]
+
+        # 如果路径已经低于我们的基准路径，说明有问题或到达了根，使用基准路径的节点
+        if base_path not in dir_path.parents and base_path != dir_path:
+             # This happens for paths outside the CWD, we anchor them at root.
+             return cache[base_path]
+        
+        # 递归地确保父节点存在
+        parent_path = dir_path.parent
+        parent_node = self._ensure_dir_exists(parent_path, base_path, cache)
+
+        # 创建当前目录的节点
+        try:
+            rel_path = dir_path.relative_to(base_path).as_posix()
+        except ValueError:
+            rel_path = dir_path.name
+            
+        new_dir_node = FileNode(
+            name=dir_path.name, path=dir_path, relative_path=rel_path, is_dir=True
+        )
+        cache[dir_path] = new_dir_node
+
+        # 将新节点附加到父节点的 children 列表中
+        parent_node.children.append(new_dir_node)
+        return new_dir_node
+
     def inspect(self, paths: List[Path]) -> List[FileNode]:
-        results = []
+        run_base_path = Path.cwd()
+        dir_nodes_cache: Dict[Path, FileNode] = {}
+
+        # 虚拟根节点，它的 children 将是最终结果
+        # 它的路径是 CWD，但相对路径是 '.'
+        root_node = FileNode(name=".", path=run_base_path, relative_path=".", is_dir=True)
+        dir_nodes_cache[run_base_path] = root_node
+
         for path in paths:
             path = path.resolve()
+            if not path.exists():
+                logger.warning(f"路径不存在: {path}")
+                continue
 
-            # 初始化匹配器
             matcher = None
-            base_path = path
-
             if self.use_gitignore:
                 git_root = find_git_root(path)
                 root_for_matcher = (
@@ -128,20 +177,31 @@ class Inspector:
                 )
 
             if path.is_file():
-                node = self._process_file(path, path.parent)
-                if node:
-                    results.append(node)
-            elif path.is_dir():
-                # 如果扫描的是当前工作目录，基准路径应为自身，以避免输出中包含当前目录名
-                base_path = path if path == Path.cwd() else path.parent
-                node = self._process_dir(path, base_path, matcher, 0)
-                if node:
-                    results.append(node)
-            else:
-                # 处理通配符可能导致的不存在路径
-                logger.warning(f"路径不存在: {path}")
+                if matcher.is_ignored(path):
+                    continue
+                parent_node = self._ensure_dir_exists(path.parent, run_base_path, dir_nodes_cache)
+                file_node = self._process_file(path, run_base_path)
+                if file_node and not any(c.path == file_node.path for c in parent_node.children):
+                    parent_node.children.append(file_node)
 
-        return results
+            elif path.is_dir():
+                dir_tree_node = self._process_dir(path, run_base_path, matcher, 0)
+                if dir_tree_node:
+                    parent_node = self._ensure_dir_exists(path.parent, run_base_path, dir_nodes_cache)
+                    
+                    # 合并逻辑：如果目录节点已存在，则合并 children，否则直接添加
+                    existing_node = next((c for c in parent_node.children if c.path == path), None)
+                    if existing_node:
+                        # 简单的合并：添加新节点中不存在的子节点
+                        existing_children_paths = {c.path for c in existing_node.children}
+                        for new_child in dir_tree_node.children:
+                            if new_child.path not in existing_children_paths:
+                                existing_node.children.append(new_child)
+                    else:
+                        parent_node.children.append(dir_tree_node)
+
+        self._sort_children_recursive(root_node)
+        return root_node.children
 
     def _process_file(self, path: Path, base_path: Path) -> Optional[FileNode]:
         try:
@@ -172,16 +232,12 @@ class Inspector:
         if self.max_depth is not None and depth > self.max_depth:
             return None
 
-        # 检查是否包含 .gitignore 并更新 matcher
+        if matcher.is_ignored(path):
+            return None
+
         if self.use_gitignore:
             local_gitignore = path / ".gitignore"
             if local_gitignore.exists():
-                # 注意：简单的实现会直接修改当前 matcher。
-                # 完美的实现应该 copy matcher，但为了性能和简单，
-                # 这里假设 matcher 的 add_patterns 支持叠加且不回退。
-                # 在递归中传递同一个 matcher 实例可能会有问题（兄弟目录干扰），
-                # 但对于自上而下的扫描，只要规则是路径特定的，通常是可以接受的。
-                # 为了严谨，我们这里简化处理：只在进入目录前加载规则。
                 matcher.add_patterns_from_file(local_gitignore)
 
         try:
@@ -191,7 +247,6 @@ class Inspector:
 
         node = FileNode(name=path.name, path=path, relative_path=rel_path, is_dir=True)
 
-        # 元数据
         if self.add_metadata:
             try:
                 stat = path.stat()
@@ -201,11 +256,7 @@ class Inspector:
                 logger.warning(f"无法获取元数据 {path}: {e}")
 
         try:
-            # 排序以保证输出稳定
-            for item in sorted(
-                path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
-            ):
-                # 基础过滤
+            for item in path.iterdir():
                 if (
                     not self.include_hidden
                     and item.name.startswith(".")
@@ -251,8 +302,6 @@ class Inspector:
                 lines = lines[-self.tail :]
 
             node.content = "".join(lines)
-
-            # 如果发生了截断，可以在这里添加标记（可选，目前保持简单）
 
         except UnicodeDecodeError:
             logger.warning(f"无法以 UTF-8 解码 {node.path}")

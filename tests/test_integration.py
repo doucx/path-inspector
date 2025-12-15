@@ -80,9 +80,10 @@ def test_cli_show_mode_tail(temp_workspace):
     )
 
     assert result.exit_code == 0
+    # 在新的逻辑下，当扫描 'src' 目录时，其内部文件的路径是相对于 'src' 的。
     assert (
-        "文件: src/utils.py" in result.stdout
-    )  # 这里的路径显示取决于 Inspector 计算的相对路径
+        "文件: utils.py" in result.stdout
+    )
     # utils.py 内容是 "def add(a, b):\n    return a + b\n"
     # tail 1 应该是 "    return a + b\n"
     assert "return a + b" in result.stdout

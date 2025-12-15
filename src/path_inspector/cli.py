@@ -160,15 +160,10 @@ def main(
     renderer = get_renderer(format)
 
     # 准备元数据
-    # 绝对路径应该指向第一个被扫描路径的绝对位置，而不是 CWD，以消除歧义。
-    if resolved_paths:
-        path_for_metadata = resolved_paths[0]
-        absolute_path_meta = str(path_for_metadata.resolve())
-        git_root = find_git_root(path_for_metadata)
-    else:
-        # Fallback
-        absolute_path_meta = str(Path.cwd())
-        git_root = find_git_root(Path.cwd())
+    # 统一使用 CWD 作为元数据的基准，以匹配 core.py 中的树构建逻辑。
+    cwd = Path.cwd()
+    absolute_path_meta = str(cwd.resolve())
+    git_root = find_git_root(cwd)
 
     render_kwargs = {
         "absolute_path": absolute_path_meta,
