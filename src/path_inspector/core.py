@@ -1,9 +1,9 @@
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 from .utils import GitignoreMatcher, find_git_root, get_global_gitignore, logger
+
 
 @dataclass
 class FileNode:
@@ -14,8 +14,8 @@ class FileNode:
     size: Optional[int] = None
     modified: Optional[str] = None
     content: Optional[str] = None
-    children: List['FileNode'] = field(default_factory=list)
-    
+    children: List["FileNode"] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式，用于 JSON 序列化"""
         node = {
@@ -23,7 +23,7 @@ class FileNode:
             "type": "dir" if self.is_dir else "file",
             "path": self.relative_path,
         }
-        
+
         metadata = {}
         if self.size is not None:
             metadata["size"] = self.size
@@ -37,8 +37,9 @@ class FileNode:
 
         if self.is_dir:
             node["children"] = [child.to_dict() for child in self.children]
-        
+
         return node
+
 
 class Inspector:
     def __init__(
@@ -52,7 +53,7 @@ class Inspector:
         read_all: bool = False,
         add_metadata: bool = False,
         head: int = 0,
-        tail: int = 0
+        tail: int = 0,
     ):
         self.include_hidden = include_hidden
         self.ignore_patterns = ignore_patterns or []
@@ -80,39 +81,43 @@ class Inspector:
         results = []
         for path in paths:
             path = path.resolve()
-            
+
             # 初始化匹配器
             matcher = None
             base_path = path
-            
+
             if self.use_gitignore:
                 git_root = find_git_root(path)
-                root_for_matcher = git_root if git_root else (path if path.is_dir() else path.parent)
+                root_for_matcher = (
+                    git_root if git_root else (path if path.is_dir() else path.parent)
+                )
                 matcher = GitignoreMatcher(root_for_matcher, self.ignore_patterns)
-                
+
                 # 加载全局规则
                 g_base, g_lines = get_global_gitignore()
                 if g_base:
                     matcher.add_patterns(g_base, g_lines)
-                
+
                 # 加载 git_root 的规则
                 if git_root:
-                    matcher.add_patterns_from_file(git_root / '.gitignore')
+                    matcher.add_patterns_from_file(git_root / ".gitignore")
             else:
                 # 即使不使用 gitignore，我们也使用 matcher 来处理命令行传入的 ignore_patterns
-                matcher = GitignoreMatcher(path if path.is_dir() else path.parent, self.ignore_patterns)
+                matcher = GitignoreMatcher(
+                    path if path.is_dir() else path.parent, self.ignore_patterns
+                )
 
-            if path.is_file(): 
-                node = self._process_file(path, path.parent) 
-                if node: 
-                    results.append(node) 
-            elif path.is_dir(): 
+            if path.is_file():
+                node = self._process_file(path, path.parent)
+                if node:
+                    results.append(node)
+            elif path.is_dir():
                 # 如果扫描的是当前工作目录，基准路径应为自身，以避免输出中包含当前目录名
                 base_path = path if path == Path.cwd() else path.parent
-                node = self._process_dir(path, base_path, matcher, 0) 
-                if node: 
-                    results.append(node) 
-            else: 
+                node = self._process_dir(path, base_path, matcher, 0)
+                if node:
+                    results.append(node)
+            else:
                 # 处理通配符可能导致的不存在路径
                 logger.warning(f"路径不存在: {path}")
 
@@ -124,12 +129,7 @@ class Inspector:
         except ValueError:
             rel_path = path.name
 
-        node = FileNode(
-            name=path.name,
-            path=path,
-            relative_path=rel_path,
-            is_dir=False
-        )
+        node = FileNode(name=path.name, path=path, relative_path=rel_path, is_dir=False)
 
         # 元数据
         if self.add_metadata:
@@ -146,13 +146,15 @@ class Inspector:
 
         return node
 
-    def _process_dir(self, path: Path, base_path: Path, matcher: GitignoreMatcher, depth: int) -> Optional[FileNode]:
+    def _process_dir(
+        self, path: Path, base_path: Path, matcher: GitignoreMatcher, depth: int
+    ) -> Optional[FileNode]:
         if self.max_depth is not None and depth > self.max_depth:
             return None
 
         # 检查是否包含 .gitignore 并更新 matcher
         if self.use_gitignore:
-            local_gitignore = path / '.gitignore'
+            local_gitignore = path / ".gitignore"
             if local_gitignore.exists():
                 # 注意：简单的实现会直接修改当前 matcher。
                 # 完美的实现应该 copy matcher，但为了性能和简单，
@@ -167,12 +169,7 @@ class Inspector:
         except ValueError:
             rel_path = path.name
 
-        node = FileNode(
-            name=path.name,
-            path=path,
-            relative_path=rel_path,
-            is_dir=True
-        )
+        node = FileNode(name=path.name, path=path, relative_path=rel_path, is_dir=True)
 
         # 元数据
         if self.add_metadata:
@@ -185,11 +182,17 @@ class Inspector:
 
         try:
             # 排序以保证输出稳定
-            for item in sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            for item in sorted(
+                path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+            ):
                 # 基础过滤
-                if not self.include_hidden and item.name.startswith('.') and item.name != '.gitignore':
+                if (
+                    not self.include_hidden
+                    and item.name.startswith(".")
+                    and item.name != ".gitignore"
+                ):
                     continue
-                
+
                 if item.is_dir() and item.name in self.ignore_dirs:
                     continue
 
@@ -214,25 +217,23 @@ class Inspector:
     def _read_content(self, node: FileNode):
         try:
             # 简单的二进制检查
-            with node.path.open('rb') as f:
-                if b'\0' in f.read(1024):
+            with node.path.open("rb") as f:
+                if b"\0" in f.read(1024):
                     logger.info(f"跳过二进制文件: {node.path}")
                     return
 
-            with node.path.open('r', encoding='utf-8') as f:
+            with node.path.open("r", encoding="utf-8") as f:
                 lines = f.readlines()
-                
-            total_lines = len(lines)
-            
+
             if self.head > 0:
-                lines = lines[:self.head]
+                lines = lines[: self.head]
             elif self.tail > 0:
-                lines = lines[-self.tail:]
-            
+                lines = lines[-self.tail :]
+
             node.content = "".join(lines)
-            
+
             # 如果发生了截断，可以在这里添加标记（可选，目前保持简单）
-            
+
         except UnicodeDecodeError:
             logger.warning(f"无法以 UTF-8 解码 {node.path}")
         except Exception as e:

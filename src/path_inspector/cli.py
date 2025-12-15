@@ -10,105 +10,108 @@ from .utils import setup_logging, logger
 
 app = typer.Typer(
     help="一个强大的文件系统检查工具，支持多种格式输出 (XML, JSON, Show)。",
-    add_completion=False
+    add_completion=False,
 )
+
 
 def version_callback(value: bool):
     if value:
         from . import __version__
+
         typer.echo(f"path-inspector v{__version__}")
         raise typer.Exit()
+
 
 @app.command()
 def main(
     paths: Annotated[
-        List[str], 
-        typer.Argument(help="要检查的文件或目录路径，支持通配符。", show_default=False)
+        List[str],
+        typer.Argument(help="要检查的文件或目录路径，支持通配符。", show_default=False),
     ],
     # --- 格式与输出 ---
     format: Annotated[
-        str, 
-        typer.Option("-f", "--format", help="输出格式: xml (默认), json, show。")
+        str, typer.Option("-f", "--format", help="输出格式: xml (默认), json, show。")
     ] = "xml",
     output: Annotated[
-        Optional[Path], 
-        typer.Option("-o", "--output", help="将结果写入文件而不是标准输出。")
+        Optional[Path],
+        typer.Option("-o", "--output", help="将结果写入文件而不是标准输出。"),
     ] = None,
     quiet: Annotated[
-        bool, 
-        typer.Option("-q", "--quiet", help="安静模式，仅显示错误信息。")
+        bool, typer.Option("-q", "--quiet", help="安静模式，仅显示错误信息。")
     ] = False,
     version: Annotated[
-        Optional[bool], 
-        typer.Option("--version", callback=version_callback, is_eager=True, help="显示版本信息。")
+        Optional[bool],
+        typer.Option(
+            "--version", callback=version_callback, is_eager=True, help="显示版本信息。"
+        ),
     ] = None,
-    
     # --- 过滤 ---
     all: Annotated[
-        bool, 
-        typer.Option("-a", "--all", help="包含隐藏文件和目录 (以 . 开头)。")
+        bool, typer.Option("-a", "--all", help="包含隐藏文件和目录 (以 . 开头)。")
     ] = False,
     ignore: Annotated[
-        Optional[List[str]], 
-        typer.Option("-i", "--ignore", help="忽略匹配该模式的文件/目录 (如 '*.log')。")
+        Optional[List[str]],
+        typer.Option("-i", "--ignore", help="忽略匹配该模式的文件/目录 (如 '*.log')。"),
     ] = None,
     ignore_dir: Annotated[
-        Optional[List[str]], 
-        typer.Option("--ignore-dir", help="忽略指定名称的目录 (如 'node_modules')。")
+        Optional[List[str]],
+        typer.Option("--ignore-dir", help="忽略指定名称的目录 (如 'node_modules')。"),
     ] = None,
     max_depth: Annotated[
-        Optional[int], 
-        typer.Option("--max-depth", help="递归扫描的最大深度。")
+        Optional[int], typer.Option("--max-depth", help="递归扫描的最大深度。")
     ] = None,
     no_gitignore: Annotated[
-        bool, 
-        typer.Option("--no-gitignore", help="不自动读取 .gitignore 文件。")
+        bool, typer.Option("--no-gitignore", help="不自动读取 .gitignore 文件。")
     ] = False,
-
     # --- 内容提取 ---
     extension: Annotated[
-        Optional[List[str]], 
-        typer.Option("-e", "--extension", help="提取指定扩展名文件的内容 (如 'py')。")
+        Optional[List[str]],
+        typer.Option("-e", "--extension", help="提取指定扩展名文件的内容 (如 'py')。"),
     ] = None,
     read_all: Annotated[
-        bool, 
-        typer.Option("--read-all", help="读取所有通过过滤的文件的内容 (覆盖 -e 选项)。")
+        bool,
+        typer.Option(
+            "--read-all", help="读取所有通过过滤的文件的内容 (覆盖 -e 选项)。"
+        ),
     ] = False,
     add_metadata: Annotated[
-        bool, 
-        typer.Option("--add-metadata", help="包含文件大小和修改时间。")
+        bool, typer.Option("--add-metadata", help="包含文件大小和修改时间。")
     ] = False,
     head: Annotated[
-        int, 
-        typer.Option("-n", "--head", help="仅读取文件的前 N 行。")
+        int, typer.Option("-n", "--head", help="仅读取文件的前 N 行。")
     ] = 0,
     tail: Annotated[
-        int, 
-        typer.Option("-t", "--tail", help="仅读取文件的后 N 行 (与 --head 互斥)。")
+        int, typer.Option("-t", "--tail", help="仅读取文件的后 N 行 (与 --head 互斥)。")
     ] = 0,
 ):
     """
     Path Inspector - 文件系统遍历与导出工具
-    
+
     示例:
-    
+
       path-inspector . -e py --format json
-      
+
       path-inspector src/ --ignore-dir __pycache__ -f xml
-      
+
       path-inspector "*.log" --format show --tail 20
     """
-    
+
     setup_logging(quiet)
-    
+
     # 参数验证
     if head > 0 and tail > 0:
-        typer.secho("错误: 不能同时指定 --head 和 --tail。", fg=typer.colors.RED, err=True)
+        typer.secho(
+            "错误: 不能同时指定 --head 和 --tail。", fg=typer.colors.RED, err=True
+        )
         raise typer.Exit(1)
-    
+
     valid_formats = ["xml", "json", "show"]
     if format not in valid_formats:
-        typer.secho(f"错误: 格式 '{format}' 无效。可用格式: {', '.join(valid_formats)}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            f"错误: 格式 '{format}' 无效。可用格式: {', '.join(valid_formats)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(1)
 
     # 路径解析 (处理通配符)
@@ -138,7 +141,7 @@ def main(
         read_all=read_all,
         add_metadata=add_metadata,
         head=head,
-        tail=tail
+        tail=tail,
     )
 
     # 执行扫描
@@ -151,10 +154,10 @@ def main(
 
     # 渲染输出
     renderer = get_renderer(format)
-    
+
     try:
         if output:
-            with open(output, 'w', encoding='utf-8') as f:
+            with open(output, "w", encoding="utf-8") as f:
                 renderer.render(nodes, f)
             if not quiet:
                 typer.secho(f"结果已写入: {output}", fg=typer.colors.GREEN)
@@ -163,6 +166,7 @@ def main(
     except Exception as e:
         logger.error(f"生成输出时发生错误: {e}")
         raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()

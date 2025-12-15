@@ -4,6 +4,7 @@ from pathlib import Path
 from path_inspector.core import FileNode
 from path_inspector.renderers import JSONRenderer, XMLRenderer, ShowRenderer
 
+
 def create_dummy_tree():
     """创建一个简单的内存中的树结构用于渲染测试"""
     # root/
@@ -11,61 +12,77 @@ def create_dummy_tree():
     #   - sub/
     #     - file2.log
     root = FileNode(name="root", path=Path("/root"), relative_path="root", is_dir=True)
-    f1 = FileNode(name="file1.txt", path=Path("/root/file1.txt"), relative_path="root/file1.txt", is_dir=False, content="hello")
-    sub = FileNode(name="sub", path=Path("/root/sub"), relative_path="root/sub", is_dir=True)
-    f2 = FileNode(name="file2.log", path=Path("/root/sub/file2.log"), relative_path="root/sub/file2.log", is_dir=False)
-    
+    f1 = FileNode(
+        name="file1.txt",
+        path=Path("/root/file1.txt"),
+        relative_path="root/file1.txt",
+        is_dir=False,
+        content="hello",
+    )
+    sub = FileNode(
+        name="sub", path=Path("/root/sub"), relative_path="root/sub", is_dir=True
+    )
+    f2 = FileNode(
+        name="file2.log",
+        path=Path("/root/sub/file2.log"),
+        relative_path="root/sub/file2.log",
+        is_dir=False,
+    )
+
     root.children = [f1, sub]
     sub.children = [f2]
     return [root]
+
 
 def test_json_renderer():
     nodes = create_dummy_tree()
     renderer = JSONRenderer()
     output = io.StringIO()
-    
+
     renderer.render(nodes, output)
     result = output.getvalue()
-    
+
     # 验证是否为有效 JSON
     data = json.loads(result)
     assert "results" in data
     assert len(data["results"]) == 1
     root_json = data["results"][0]
-    
+
     assert root_json["name"] == "root"
     assert root_json["type"] == "dir"
     assert len(root_json["children"]) == 2
-    
+
     # 检查文件内容是否包含
     f1_json = root_json["children"][0]
     assert f1_json["name"] == "file1.txt"
     assert f1_json["content"] == "hello"
 
+
 def test_xml_renderer():
     nodes = create_dummy_tree()
     renderer = XMLRenderer()
     output = io.StringIO()
-    
+
     renderer.render(nodes, output)
     result = output.getvalue()
-    
+
     assert "<?xml" in result
     assert '<Directory name="root"' in result
     assert '<File name="file1.txt"' in result
     # Root(indent=1) -> File(indent=2, prefix=4 spaces) -> CDATA(prefix + 2 spaces = 6 spaces)
-    assert '      <![CDATA[\nhello\n      ]]>' in result
+    assert "      <![CDATA[\nhello\n      ]]>" in result
+
 
 def test_show_renderer():
     nodes = create_dummy_tree()
     renderer = ShowRenderer()
     output = io.StringIO()
-    
+
     renderer.render(nodes, output)
     result = output.getvalue()
-    
+
     assert "文件: root/file1.txt" in result
     assert "--- 内容开始 ---" in result
     assert "hello" in result
     # file2 没有内容，Show 模式默认不显示没有内容的文件的块（除非有元数据，但这里是最简测试）
-    assert "file2.log" not in result 
+    assert "file2.log" not in result

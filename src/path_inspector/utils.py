@@ -2,29 +2,31 @@ import logging
 import fnmatch
 import subprocess
 from pathlib import Path
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional
+
 
 # 配置日志
 def setup_logging(quiet: bool = False):
     level = logging.WARNING if quiet else logging.INFO
     logging.basicConfig(
-        level=level,
-        format='%(levelname)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        level=level, format="%(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
 
+
 logger = logging.getLogger("path-inspector")
+
 
 class GitignoreMatcher:
     """
     处理 .gitignore 规则的匹配器。
     支持层级规则应用和全局 gitignore。
     """
+
     def __init__(self, root_path: Path, additional_patterns: List[str] = None):
         self.root_path = root_path
         # 存储格式: (base_path, [(pattern, is_negated)])
         self.patterns: List[Tuple[Path, List[Tuple[str, bool]]]] = []
-        
+
         if additional_patterns:
             self.add_patterns(self.root_path, additional_patterns)
 
@@ -32,9 +34,9 @@ class GitignoreMatcher:
         """加载并解析 .gitignore 文件"""
         if not gitignore_path.is_file():
             return
-        
+
         try:
-            with open(gitignore_path, 'r', encoding='utf-8') as f:
+            with open(gitignore_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             self.add_patterns(gitignore_path.parent, lines)
         except OSError as e:
@@ -45,19 +47,19 @@ class GitignoreMatcher:
         parsed = []
         for line in lines:
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            
-            is_negated = line.startswith('!')
+
+            is_negated = line.startswith("!")
             if is_negated:
                 line = line[1:]
-            
+
             # 处理目录标记
-            if line.endswith('/'):
-                line = line.rstrip('/')
-            
+            if line.endswith("/"):
+                line = line.rstrip("/")
+
             parsed.append((line, is_negated))
-        
+
         if parsed:
             self.patterns.append((base_path, parsed))
 
@@ -76,28 +78,28 @@ class GitignoreMatcher:
             try:
                 rel_to_base = path.relative_to(base_path).as_posix()
             except ValueError:
-                continue # 规则不适用于此路径
+                continue  # 规则不适用于此路径
 
             path_name = path.name
 
             for pattern, is_negated in patterns:
                 matched = False
-                
+
                 # 处理 ** (简化版)
-                pat = pattern.replace('**', '*')
-                
+                pat = pattern.replace("**", "*")
+
                 # 1. 匹配文件名 (name match) - 适用于没有斜杠的模式
-                if '/' not in pat:
+                if "/" not in pat:
                     if fnmatch.fnmatch(path_name, pat):
                         matched = True
-                
+
                 # 2. 匹配路径 (path match)
                 # 如果模式以 / 开头，则它是相对于 .gitignore 位置的锚定路径
                 if not matched:
                     check_path = rel_to_base
-                    if pat.startswith('/'):
+                    if pat.startswith("/"):
                         pat = pat[1:]
-                    
+
                     if fnmatch.fnmatch(check_path, pat):
                         matched = True
 
@@ -106,25 +108,29 @@ class GitignoreMatcher:
 
         return is_ignored_flag
 
+
 def find_git_root(start_path: Path) -> Optional[Path]:
     """向上查找 .git 目录"""
     current = start_path.resolve()
     for parent in [current] + list(current.parents):
-        if (parent / '.git').exists():
+        if (parent / ".git").exists():
             return parent
     return None
+
 
 def get_global_gitignore() -> Tuple[Optional[Path], List[str]]:
     """获取全局 gitignore 配置"""
     try:
         res = subprocess.run(
-            ['git', 'config', '--get', 'core.excludesfile'],
-            capture_output=True, text=True, check=False
+            ["git", "config", "--get", "core.excludesfile"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if res.returncode == 0 and res.stdout.strip():
             path = Path(res.stdout.strip()).expanduser().resolve()
             if path.is_file():
-                return path.parent, path.read_text(encoding='utf-8').splitlines()
+                return path.parent, path.read_text(encoding="utf-8").splitlines()
     except Exception:
         pass
     return None, []
