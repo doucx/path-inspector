@@ -2,7 +2,7 @@ import json
 import io
 from pathlib import Path
 from path_inspector.core import FileNode
-from path_inspector.renderers import JSONRenderer, XMLRenderer, ShowRenderer
+from path_inspector.renderers import JSONRenderer, XMLRenderer, ShowRenderer, CompactJSONRenderer
 
 
 def create_dummy_tree():
@@ -34,7 +34,7 @@ def create_dummy_tree():
     return [root]
 
 
-def test_json_renderer():
+def test_json_renderer_standard():
     nodes = create_dummy_tree()
     renderer = JSONRenderer()
     output = io.StringIO()
@@ -48,14 +48,47 @@ def test_json_renderer():
     assert len(data["results"]) == 1
     root_json = data["results"][0]
 
+    # 标准模式下 name 应为 'root' (relative_path)
     assert root_json["name"] == "root"
     assert root_json["type"] == "dir"
+    # 标准模式下 path 属性应该保留
+    assert "path" in root_json 
     assert len(root_json["children"]) == 2
 
     # 检查文件内容是否包含
     f1_json = root_json["children"][0]
     assert f1_json["name"] == "file1.txt"
     assert f1_json["content"] == "hello"
+
+
+def test_compact_json_renderer():
+    nodes = create_dummy_tree()
+    renderer = CompactJSONRenderer()
+    output = io.StringIO()
+
+    renderer.render(nodes, output)
+    result = output.getvalue()
+
+    # 验证是否为有效、紧凑的 JSON
+    data = json.loads(result)
+    assert len(data) == 1
+    root_json = data[0]
+
+    # 紧凑模式下使用 'n'
+    assert root_json["n"] == "root" 
+    # 紧凑模式不包含 type, path, metadata 属性
+    assert "type" not in root_json
+    assert "path" not in root_json
+    
+    # 检查文件内容是否包含 (key 'content')
+    # 子节点应该使用 basename 作为 'n'
+    f1_json = root_json["c"][0]
+    assert f1_json["n"] == "file1.txt"
+    assert f1_json["content"] == "hello"
+    
+    # 验证输出非常紧凑 (没有缩进空格)
+    assert "\n" not in result
+    assert " " not in result.strip()
 
 
 def test_xml_renderer():
@@ -69,6 +102,8 @@ def test_xml_renderer():
     assert "<?xml" in result
     assert '<Directory name="root"' in result
     assert '<File name="file1.txt"' in result
+    # 确保 path 属性已被移除
+    assert 'path="' not in result
     # Root(indent=1) -> File(indent=2, prefix=4 spaces) -> CDATA(prefix + 2 spaces = 6 spaces)
     assert "      <![CDATA[\nhello\n      ]]>" in result
 

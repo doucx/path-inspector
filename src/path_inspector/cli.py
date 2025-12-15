@@ -25,12 +25,12 @@ def version_callback(value: bool):
 @app.command()
 def main(
     paths: Annotated[
-        List[str],
+        Optional[List[str]],
         typer.Argument(help="要检查的文件或目录路径，支持通配符。", show_default=False),
-    ],
+    ] = None,
     # --- 格式与输出 ---
     format: Annotated[
-        str, typer.Option("-f", "--format", help="输出格式: xml (默认), json, show。")
+        str, typer.Option("-f", "--format", help="输出格式: xml (默认), json, compact, show。")
     ] = "xml",
     output: Annotated[
         Optional[Path],
@@ -98,6 +98,10 @@ def main(
 
     setup_logging(quiet)
 
+    # 处理默认路径
+    if paths is None:
+        paths = ["."]
+
     # 参数验证
     if head > 0 and tail > 0:
         typer.secho(
@@ -105,7 +109,7 @@ def main(
         )
         raise typer.Exit(1)
 
-    valid_formats = ["xml", "json", "show"]
+    valid_formats = ["xml", "json", "compact", "show"]
     if format not in valid_formats:
         typer.secho(
             f"错误: 格式 '{format}' 无效。可用格式: {', '.join(valid_formats)}",

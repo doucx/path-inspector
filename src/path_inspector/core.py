@@ -16,12 +16,32 @@ class FileNode:
     content: Optional[str] = None
     children: List["FileNode"] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, compact: bool = False, is_root: bool = False) -> Dict[str, Any]:
         """转换为字典格式，用于 JSON 序列化"""
+        
+        # 决定显示的名称：根节点使用 relative_path (如 . 或 src)，子节点使用 name (basename)
+        display_name = self.relative_path if is_root else self.name
+        
+        if compact:
+            # 紧凑模式: n (name), c (children), content (可选)
+            node = {"n": display_name}
+            
+            if self.is_dir:
+                node["c"] = [
+                    child.to_dict(compact=True, is_root=False) for child in self.children
+                ]
+            
+            if self.content is not None:
+                node["content"] = self.content
+                
+            return node
+
+
+        # 标准模式 (json)
         node = {
-            "name": self.name,
+            "name": display_name, # 标准模式也使用规范化的名称
             "type": "dir" if self.is_dir else "file",
-            "path": self.relative_path,
+            "path": self.relative_path, # 标准模式保留 path
         }
 
         metadata = {}

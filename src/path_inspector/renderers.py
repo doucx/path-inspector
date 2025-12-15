@@ -11,10 +11,20 @@ class Renderer:
 
 class JSONRenderer(Renderer):
     def render(self, nodes: List[FileNode], output: TextIO):
-        data = {"results": [node.to_dict() for node in nodes]}
+        # 标准模式下，需要顶层 "results" 数组，且将 is_root=True 传递给根节点
+        data = {"results": [node.to_dict(is_root=True) for node in nodes]}
         # 使用 ensure_ascii=False 支持中文文件名
         json.dump(data, output, indent=2, ensure_ascii=False)
         output.write("\n")
+
+
+class CompactJSONRenderer(Renderer):
+    def render(self, nodes: List[FileNode], output: TextIO):
+        # 紧凑模式下，直接输出根节点列表
+        # 传递 compact=True 和 is_root=True
+        data = [node.to_dict(compact=True, is_root=True) for node in nodes]
+        # 使用 separators=(',', ':') 移除所有空格和换行
+        json.dump(data, output, separators=(",", ":"), ensure_ascii=False)
 
 
 class XMLRenderer(Renderer):
@@ -22,12 +32,16 @@ class XMLRenderer(Renderer):
         output.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         output.write("<PathInspectorResults>\n")
         for node in nodes:
-            self._render_node(node, output, indent=1)
+            self._render_node(node, output, indent=1, is_root=True)
         output.write("</PathInspectorResults>\n")
 
-    def _render_node(self, node: FileNode, output: TextIO, indent: int):
+    def _render_node(
+        self, node: FileNode, output: TextIO, indent: int, is_root: bool = False
+    ):
         prefix = "  " * indent
-        attrs = f'name="{escape(node.name)}" path="{escape(node.relative_path)}"'
+        # 如果是根节点，使用相对路径作为名称，消除歧义；否则仅使用文件名
+        display_name = node.relative_path if is_root else node.name
+        attrs = f'name="{escape(display_name)}"'
 
         if node.size is not None:
             attrs += f' size="{node.size}"'
@@ -37,7 +51,7 @@ class XMLRenderer(Renderer):
         if node.is_dir:
             output.write(f"{prefix}<Directory {attrs}>\n")
             for child in node.children:
-                self._render_node(child, output, indent + 1)
+                self._render_node(child, output, indent + 1, is_root=False)
             output.write(f"{prefix}</Directory>\n")
         else:
             if node.content is not None:
@@ -89,6 +103,8 @@ class ShowRenderer(Renderer):
 def get_renderer(format_name: str) -> Renderer:
     if format_name == "json":
         return JSONRenderer()
+    elif format_name == "compact":
+        return CompactJSONRenderer()
     elif format_name == "show":
         return ShowRenderer()
     else:

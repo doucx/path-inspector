@@ -8,7 +8,7 @@ def test_cli_help():
     """测试帮助信息是否正常显示"""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "输出格式: xml (默认), json, show" in result.stdout
+    assert "输出格式: xml (默认), json, compact, show" in result.stdout
 
 
 def test_cli_full_flow_json(temp_workspace):
