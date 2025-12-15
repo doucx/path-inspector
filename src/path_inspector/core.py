@@ -102,15 +102,17 @@ class Inspector:
                 # 即使不使用 gitignore，我们也使用 matcher 来处理命令行传入的 ignore_patterns
                 matcher = GitignoreMatcher(path if path.is_dir() else path.parent, self.ignore_patterns)
 
-            if path.is_file():
-                node = self._process_file(path, path.parent)
-                if node:
-                    results.append(node)
-            elif path.is_dir():
-                node = self._process_dir(path, path.parent, matcher, 0)
-                if node:
-                    results.append(node)
-            else:
+            if path.is_file(): 
+                node = self._process_file(path, path.parent) 
+                if node: 
+                    results.append(node) 
+            elif path.is_dir(): 
+                # 如果扫描的是当前工作目录，基准路径应为自身，以避免输出中包含当前目录名
+                base_path = path if path == Path.cwd() else path.parent
+                node = self._process_dir(path, base_path, matcher, 0) 
+                if node: 
+                    results.append(node) 
+            else: 
                 # 处理通配符可能导致的不存在路径
                 logger.warning(f"路径不存在: {path}")
 
