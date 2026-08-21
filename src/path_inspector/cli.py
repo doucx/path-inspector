@@ -1,12 +1,14 @@
 import typer
+import click
 import sys
 import glob
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Any
 from typing_extensions import Annotated
 from .core import Inspector
 from .renderers import get_renderer
 from .utils import setup_logging, logger, find_git_root
+from .config import load_preset, find_config_file, get_all_presets
 
 app = typer.Typer(
     help="一个强大的文件系统检查工具，支持多种格式输出 (XML, JSON, Show)。",
@@ -22,11 +24,55 @@ def version_callback(value: bool):
         raise typer.Exit()
 
 
+def list_presets_callback(value: bool):
+    if value:
+        cfg_file = find_config_file()
+        if not cfg_file:
+            typer.secho("未找到任何 piconfig.json 配置文件。", fg=typer.colors.YELLOW)
+            raise typer.Exit()
+
+        presets = get_all_presets(cfg_file)
+        if not presets:
+            typer.echo(f"配置文件 {cfg_file} 中未定义任何预设。")
+            raise typer.Exit()
+
+        typer.secho(f"配置文件: {cfg_file}", fg=typer.colors.CYAN)
+        typer.echo("可用预设:")
+        for name, conf in presets.items():
+            exts = conf.get("extension", [])
+            ext_str = f" [extensions: {', '.join(exts)}]" if exts else ""
+            typer.echo(f"  - {name}{ext_str}")
+        raise typer.Exit()
+
+
 @app.command()
 def main(
+    ctx: typer.Context,
     paths: Annotated[
         Optional[List[str]],
         typer.Argument(help="要检查的文件或目录路径，支持通配符。", show_default=False),
+    ] = None,
+    # --- 配置文件与预设 ---
+    preset: Annotated[
+        Optional[str],
+        typer.Option(
+            "-x",
+            "--preset",
+            help="使用 piconfig.json 中定义的预设配置 (如 'web', 'default')。",
+        ),
+    ] = None,
+    config_file: Annotated[
+        Optional[Path],
+        typer.Option("-c", "--config", help="显式指定 piconfig.json 配置文件路径。"),
+    ] = None,
+    list_presets: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--list-presets",
+            callback=list_presets_callback,
+            is_eager=True,
+            help="列出当前可用的所有预设并退出。",
+        ),
     ] = None,
     # --- 格式与输出 ---
     format: Annotated[
@@ -86,17 +132,34 @@ def main(
 ):
     """
     Path Inspector - 文件系统遍历与导出工具
-
-    示例:
-
-      path-inspector . -e py --format json
-
-      path-inspector src/ --ignore-dir __pycache__ -f xml
-
-      path-inspector "*.log" --format show --tail 20
     """
-
     setup_logging(quiet)
+
+    # 加载配置文件与预设
+    preset_kwargs = load_preset(config_file, preset)
+
+    # 命令行显式指定参数优先于预设参数
+    def get_param(name: str, cli_value: Any) -> Any:
+        source = ctx.get_parameter_source(name)
+        if source != click.core.ParameterSource.COMMANDLINE and name in preset_kwargs:
+            val = preset_kwargs[name]
+            # 兼容单个字符串传入 list 类型的配置
+            if name in ("extension", "ignore", "ignore_dir") and isinstance(val, str):
+                return [val]
+            return val
+        return cli_value
+
+    format = get_param("format", format)
+    all = get_param("all", all)
+    ignore = get_param("ignore", ignore)
+    ignore_dir = get_param("ignore_dir", ignore_dir)
+    max_depth = get_param("max_depth", max_depth)
+    no_gitignore = get_param("no_gitignore", no_gitignore)
+    extension = get_param("extension", extension)
+    read_all = get_param("read_all", read_all)
+    add_metadata = get_param("add_metadata", add_metadata)
+    head = get_param("head", head)
+    tail = get_param("tail", tail)
 
     # 处理默认路径
     if paths is None:
@@ -121,11 +184,8 @@ def main(
     # 路径解析 (处理通配符)
     resolved_paths = []
     for p_str in paths:
-        # glob 在 Linux 上不自动展开 Argument，所以手动处理以防万一
-        # 且支持 ** 递归
         matches = list(glob.glob(p_str, recursive=True))
         if not matches:
-            # 如果 glob 没匹配到，可能是新建文件或纯文件名，直接加进去让 Inspector 报错或处理
             resolved_paths.append(Path(p_str))
         else:
             resolved_paths.extend([Path(m) for m in matches])
@@ -159,8 +219,6 @@ def main(
     # 渲染输出
     renderer = get_renderer(format)
 
-    # 准备元数据
-    # 统一使用 CWD 作为元数据的基准，以匹配 core.py 中的树构建逻辑。
     cwd = Path.cwd()
     absolute_path_meta = str(cwd.resolve())
     git_root = find_git_root(cwd)
