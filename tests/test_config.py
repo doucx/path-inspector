@@ -1,8 +1,9 @@
 import json
-from pathlib import Path
+
 from typer.testing import CliRunner
-from path_inspector.config import find_config_file, load_preset, get_all_presets
+
 from path_inspector.cli import app
+from path_inspector.config import find_config_file, load_preset
 
 runner = CliRunner()
 
@@ -103,3 +104,44 @@ def test_cli_list_presets(tmp_path, monkeypatch):
     assert "可用预设:" in result.stdout
     assert "default [extensions: py]" in result.stdout
     assert "frontend [extensions: ts, tsx]" in result.stdout
+
+
+def test_cli_preset_with_paths(tmp_path, monkeypatch):
+    """测试预设中直接配置 paths/files 列表"""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "a.ts").write_text("const a = 1;", encoding="utf-8")
+    (workspace / "b.ts").write_text("const b = 2;", encoding="utf-8")
+    (workspace / "c.ts").write_text("const c = 3;", encoding="utf-8")
+
+    config_content = {
+        "presets": {
+            "cards": {
+                "format": "json",
+                "paths": ["a.ts", "c.ts"],
+                "extension": ["ts"],
+            }
+        }
+    }
+    (workspace / "piconfig.json").write_text(
+        json.dumps(config_content), encoding="utf-8"
+    )
+    monkeypatch.chdir(workspace)
+
+    # 1. 运行 -x cards，自动只读取 a.ts 和 c.ts
+    result = runner.invoke(app, ["-x", "cards"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    results = data["results"]
+    names = [node["name"] for node in results]
+    assert "a.ts" in names
+    assert "c.ts" in names
+    assert "b.ts" not in names
+
+    # 2. 命令行显式指定路径覆盖预设里的 paths
+    result_override = runner.invoke(app, ["b.ts", "-x", "cards"])
+    assert result_override.exit_code == 0
+    data_override = json.loads(result_override.stdout)
+    names_override = [node["name"] for node in data_override["results"]]
+    assert "b.ts" in names_override
+    assert "a.ts" not in names_override

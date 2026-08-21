@@ -1,18 +1,19 @@
 import json
+from typing import Any, TextIO
 from xml.sax.saxutils import escape
-from typing import List, TextIO, Any, Dict
+
 from .core import FileNode
 
 
 class Renderer:
-    def render(self, nodes: List[FileNode], output: TextIO, **kwargs: Any):
+    def render(self, nodes: list[FileNode], output: TextIO, **kwargs: Any):
         raise NotImplementedError
 
 
 class JSONRenderer(Renderer):
-    def render(self, nodes: List[FileNode], output: TextIO, **kwargs: Any):
+    def render(self, nodes: list[FileNode], output: TextIO, **kwargs: Any):
         # 标准模式下，需要顶层 "results" 数组，且将 is_root=True 传递给根节点
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "absolute_path": kwargs.get("absolute_path"),
             "repository_root": kwargs.get("repository_root"),
             "results": [node.to_dict(is_root=True) for node in nodes],
@@ -23,7 +24,7 @@ class JSONRenderer(Renderer):
 
 
 class CompactJSONRenderer(Renderer):
-    def render(self, nodes: List[FileNode], output: TextIO, **kwargs: Any):
+    def render(self, nodes: list[FileNode], output: TextIO, **kwargs: Any):
         # 紧凑模式下，将元数据和数据分开
         data = {
             "meta": {
@@ -37,9 +38,9 @@ class CompactJSONRenderer(Renderer):
 
 
 class XMLRenderer(Renderer):
-    def render(self, nodes: List[FileNode], output: TextIO, **kwargs: Any):
+    def render(self, nodes: list[FileNode], output: TextIO, **kwargs: Any):
         output.write('<?xml version="1.0" encoding="UTF-8"?>\n')
-        
+
         attrs = ""
         if kwargs.get("absolute_path"):
             attrs += f' absolute_path="{escape(kwargs["absolute_path"])}"'
@@ -47,7 +48,7 @@ class XMLRenderer(Renderer):
             attrs += f' repository_root="{escape(kwargs["repository_root"])}"'
 
         output.write(f"<PathInspectorResults{attrs}>\n")
-        
+
         for node in nodes:
             self._render_node(node, output, indent=1, is_root=True)
         output.write("</PathInspectorResults>\n")
@@ -85,12 +86,12 @@ class XMLRenderer(Renderer):
 
 
 class ShowRenderer(Renderer):
-    def render(self, nodes: List[FileNode], output: TextIO, **kwargs: Any):
+    def render(self, nodes: list[FileNode], output: TextIO, **kwargs: Any):
         # 移除 source_directory
         header = f"Absolute Path: {kwargs.get('absolute_path')}"
-        if kwargs.get('repository_root'):
+        if kwargs.get("repository_root"):
             header += f" (Repo Root: {kwargs.get('repository_root')})"
-            
+
         output.write(f"{header}\n")
         output.write("-" * len(header) + "\n\n")
 

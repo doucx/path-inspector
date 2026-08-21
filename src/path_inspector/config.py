@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from .utils import find_git_root, logger
 
 CONFIG_FILE_NAME = "piconfig.json"
 
 
-def find_config_file(custom_path: Optional[Path] = None) -> Optional[Path]:
+def find_config_file(custom_path: Path | None = None) -> Path | None:
     """按优先级查找配置文件: 显式指定 > CWD > Git Root > 用户全局目录"""
     if custom_path:
         if custom_path.is_file():
@@ -38,7 +39,7 @@ def find_config_file(custom_path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def get_all_presets(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def get_all_presets(config_path: Path | None = None) -> dict[str, Any]:
     """获取配置文件中定义的所有预设"""
     target_config = find_config_file(config_path)
     if not target_config:
@@ -48,14 +49,14 @@ def get_all_presets(config_path: Optional[Path] = None) -> Dict[str, Any]:
         with open(target_config, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data.get("presets", {})
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.error(f"读取配置文件 {target_config} 失败: {e}")
         return {}
 
 
 def load_preset(
-    config_path: Optional[Path] = None, preset_name: Optional[str] = None
-) -> Dict[str, Any]:
+    config_path: Path | None = None, preset_name: str | None = None
+) -> dict[str, Any]:
     """从配置文件中读取指定预设或 default 预设的参数字典"""
     target_config = find_config_file(config_path)
     if not target_config:

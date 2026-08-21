@@ -1,14 +1,15 @@
-import typer
-import click
-import sys
 import glob
+import sys
 from pathlib import Path
-from typing import List, Optional, Any
-from typing_extensions import Annotated
+from typing import Annotated, Any
+
+import click
+import typer
+
+from .config import find_config_file, get_all_presets, load_preset
 from .core import Inspector
 from .renderers import get_renderer
-from .utils import setup_logging, logger, find_git_root
-from .config import load_preset, find_config_file, get_all_presets
+from .utils import find_git_root, logger, setup_logging
 
 app = typer.Typer(
     help="一个强大的文件系统检查工具，支持多种格式输出 (XML, JSON, Show)。",
@@ -39,9 +40,16 @@ def list_presets_callback(value: bool):
         typer.secho(f"配置文件: {cfg_file}", fg=typer.colors.CYAN)
         typer.echo("可用预设:")
         for name, conf in presets.items():
+            info_parts = []
             exts = conf.get("extension", [])
-            ext_str = f" [extensions: {', '.join(exts)}]" if exts else ""
-            typer.echo(f"  - {name}{ext_str}")
+            if exts:
+                info_parts.append(f"extensions: {', '.join(exts)}")
+            paths = conf.get("paths") or conf.get("files")
+            if paths:
+                p_count = len(paths) if isinstance(paths, list) else 1
+                info_parts.append(f"{p_count} 个预设路径")
+            info_str = f" [{'; '.join(info_parts)}]" if info_parts else ""
+            typer.echo(f"  - {name}{info_str}")
         raise typer.Exit()
 
 
@@ -49,12 +57,12 @@ def list_presets_callback(value: bool):
 def main(
     ctx: typer.Context,
     paths: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Argument(help="要检查的文件或目录路径，支持通配符。", show_default=False),
     ] = None,
     # --- 配置文件与预设 ---
     preset: Annotated[
-        Optional[str],
+        str | None,
         typer.Option(
             "-x",
             "--preset",
@@ -62,11 +70,11 @@ def main(
         ),
     ] = None,
     config_file: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("-c", "--config", help="显式指定 piconfig.json 配置文件路径。"),
     ] = None,
     list_presets: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--list-presets",
             callback=list_presets_callback,
@@ -76,17 +84,20 @@ def main(
     ] = None,
     # --- 格式与输出 ---
     format: Annotated[
-        str, typer.Option("-f", "--format", help="输出格式: xml (默认), json, compact, show。")
+        str,
+        typer.Option(
+            "-f", "--format", help="输出格式: xml (默认), json, compact, show。"
+        ),
     ] = "xml",
     output: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option("-o", "--output", help="将结果写入文件而不是标准输出。"),
     ] = None,
     quiet: Annotated[
         bool, typer.Option("-q", "--quiet", help="安静模式，仅显示错误信息。")
     ] = False,
     version: Annotated[
-        Optional[bool],
+        bool | None,
         typer.Option(
             "--version", callback=version_callback, is_eager=True, help="显示版本信息。"
         ),
@@ -96,22 +107,22 @@ def main(
         bool, typer.Option("-a", "--all", help="包含隐藏文件和目录 (以 . 开头)。")
     ] = False,
     ignore: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Option("-i", "--ignore", help="忽略匹配该模式的文件/目录 (如 '*.log')。"),
     ] = None,
     ignore_dir: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Option("--ignore-dir", help="忽略指定名称的目录 (如 'node_modules')。"),
     ] = None,
     max_depth: Annotated[
-        Optional[int], typer.Option("--max-depth", help="递归扫描的最大深度。")
+        int | None, typer.Option("--max-depth", help="递归扫描的最大深度。")
     ] = None,
     no_gitignore: Annotated[
         bool, typer.Option("--no-gitignore", help="不自动读取 .gitignore 文件。")
     ] = False,
     # --- 内容提取 ---
     extension: Annotated[
-        Optional[List[str]],
+        list[str] | None,
         typer.Option("-e", "--extension", help="提取指定扩展名文件的内容 (如 'py')。"),
     ] = None,
     read_all: Annotated[
@@ -161,9 +172,16 @@ def main(
     head = get_param("head", head)
     tail = get_param("tail", tail)
 
-    # 处理默认路径
+    # 处理路径：若命令行未指定，优先使用预设中配置的 paths 或 files
     if paths is None:
-        paths = ["."]
+        preset_paths = preset_kwargs.get("paths") or preset_kwargs.get("files")
+        if preset_paths:
+            if isinstance(preset_paths, str):
+                paths = [preset_paths]
+            elif isinstance(preset_paths, list):
+                paths = preset_paths
+        else:
+            paths = ["."]
 
     # 参数验证
     if head > 0 and tail > 0:
@@ -212,7 +230,7 @@ def main(
     logger.info("开始扫描...")
     try:
         nodes = inspector.inspect(resolved_paths)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(f"扫描过程中发生错误: {e}")
         raise typer.Exit(1)
 
@@ -236,7 +254,7 @@ def main(
                 typer.secho(f"结果已写入: {output}", fg=typer.colors.GREEN)
         else:
             renderer.render(nodes, sys.stdout, **render_kwargs)
-    except Exception as e:
+    except (OSError, UnicodeEncodeError) as e:
         logger.error(f"生成输出时发生错误: {e}")
         raise typer.Exit(1)
 

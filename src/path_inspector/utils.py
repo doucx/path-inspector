@@ -1,8 +1,7 @@
-import logging
 import fnmatch
+import logging
 import subprocess
 from pathlib import Path
-from typing import List, Tuple, Optional
 
 
 # 配置日志
@@ -22,10 +21,10 @@ class GitignoreMatcher:
     支持层级规则应用和全局 gitignore。
     """
 
-    def __init__(self, root_path: Path, additional_patterns: List[str] = None):
+    def __init__(self, root_path: Path, additional_patterns: list[str] | None = None):
         self.root_path = root_path
         # 存储格式: (base_path, [(pattern, is_negated)])
-        self.patterns: List[Tuple[Path, List[Tuple[str, bool]]]] = []
+        self.patterns: list[tuple[Path, list[tuple[str, bool]]]] = []
 
         if additional_patterns:
             self.add_patterns(self.root_path, additional_patterns)
@@ -42,7 +41,7 @@ class GitignoreMatcher:
         except OSError as e:
             logger.debug(f"无法读取 .gitignore {gitignore_path}: {e}")
 
-    def add_patterns(self, base_path: Path, lines: List[str]):
+    def add_patterns(self, base_path: Path, lines: list[str]):
         """解析规则行"""
         parsed = []
         for line in lines:
@@ -89,16 +88,14 @@ class GitignoreMatcher:
                 pat = pattern.replace("**", "*")
 
                 # 1. 匹配文件名 (name match) - 适用于没有斜杠的模式
-                if "/" not in pat:
-                    if fnmatch.fnmatch(path_name, pat):
-                        matched = True
+                if "/" not in pat and fnmatch.fnmatch(path_name, pat):
+                    matched = True
 
                 # 2. 匹配路径 (path match)
                 # 如果模式以 / 开头，则它是相对于 .gitignore 位置的锚定路径
                 if not matched:
                     check_path = rel_to_base
-                    if pat.startswith("/"):
-                        pat = pat[1:]
+                    pat = pat.removeprefix("/")
 
                     if fnmatch.fnmatch(check_path, pat):
                         matched = True
@@ -109,7 +106,7 @@ class GitignoreMatcher:
         return is_ignored_flag
 
 
-def find_git_root(start_path: Path) -> Optional[Path]:
+def find_git_root(start_path: Path) -> Path | None:
     """向上查找 .git 目录"""
     current = start_path.resolve()
     for parent in [current] + list(current.parents):
@@ -118,7 +115,7 @@ def find_git_root(start_path: Path) -> Optional[Path]:
     return None
 
 
-def get_global_gitignore() -> Tuple[Optional[Path], List[str]]:
+def get_global_gitignore() -> tuple[Path | None, list[str]]:
     """获取全局 gitignore 配置"""
     try:
         res = subprocess.run(
@@ -131,6 +128,6 @@ def get_global_gitignore() -> Tuple[Optional[Path], List[str]]:
             path = Path(res.stdout.strip()).expanduser().resolve()
             if path.is_file():
                 return path.parent, path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        pass
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug(f"获取全局 gitignore 失败: {e}")
     return None, []

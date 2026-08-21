@@ -1,8 +1,14 @@
-import json
 import io
+import json
 from pathlib import Path
+
 from path_inspector.core import FileNode
-from path_inspector.renderers import JSONRenderer, XMLRenderer, ShowRenderer, CompactJSONRenderer
+from path_inspector.renderers import (
+    CompactJSONRenderer,
+    JSONRenderer,
+    ShowRenderer,
+    XMLRenderer,
+)
 
 
 def create_dummy_tree():
@@ -40,10 +46,7 @@ def test_json_renderer_standard():
     output = io.StringIO()
 
     renderer.render(
-        nodes, 
-        output, 
-        absolute_path="/tmp/scan/root", 
-        repository_root="/tmp"
+        nodes, output, absolute_path="/tmp/scan/root", repository_root="/tmp"
     )
     result = output.getvalue()
 
@@ -59,7 +62,7 @@ def test_json_renderer_standard():
     assert root_json["name"] == "."
     assert root_json["type"] == "dir"
     # 标准模式下 path 属性应该保留
-    assert "path" in root_json 
+    assert "path" in root_json
     assert len(root_json["children"]) == 2
 
     # 检查文件内容是否包含
@@ -74,10 +77,7 @@ def test_compact_json_renderer():
     output = io.StringIO()
 
     renderer.render(
-        nodes, 
-        output, 
-        absolute_path="/tmp/scan/root", 
-        repository_root="/tmp"
+        nodes, output, absolute_path="/tmp/scan/root", repository_root="/tmp"
     )
     result = output.getvalue()
 
@@ -94,13 +94,13 @@ def test_compact_json_renderer():
     # 紧凑模式不包含 type, path, metadata 属性
     assert "type" not in root_json
     assert "path" not in root_json
-    
+
     # 检查文件内容是否包含 (key 'content')
     # 子节点应该使用 basename 作为 'n'
     f1_json = root_json["c"][0]
     assert f1_json["n"] == "file1.txt"
     assert f1_json["content"] == "hello"
-    
+
     # 验证输出非常紧凑 (没有缩进空格)
     assert "\n" not in result
     assert " " not in result.strip()
@@ -112,10 +112,7 @@ def test_xml_renderer():
     output = io.StringIO()
 
     renderer.render(
-        nodes, 
-        output, 
-        absolute_path="/tmp/scan/root", 
-        repository_root="/tmp"
+        nodes, output, absolute_path="/tmp/scan/root", repository_root="/tmp"
     )
     result = output.getvalue()
 
@@ -125,7 +122,7 @@ def test_xml_renderer():
     assert '<Directory name="root"' in result
     assert '<File name="file1.txt"' in result
     # 确保文件/目录节点没有冗余的 'path=' 属性
-    assert '<File name="file1.txt" path="' not in result 
+    assert '<File name="file1.txt" path="' not in result
     assert '<Directory name="root" path="' not in result
     # Root(indent=1) -> File(indent=2, prefix=4 spaces) -> CDATA(prefix + 2 spaces = 6 spaces)
     assert "      <![CDATA[\nhello\n      ]]>" in result
@@ -137,13 +134,10 @@ def test_show_renderer():
     output = io.StringIO()
 
     renderer.render(
-        nodes, 
-        output, 
-        absolute_path="/tmp/scan/root",
-        repository_root="/tmp"
+        nodes, output, absolute_path="/tmp/scan/root", repository_root="/tmp"
     )
     result = output.getvalue()
-    
+
     assert "Absolute Path: /tmp/scan/root (Repo Root: /tmp)" in result
     assert "文件: root/file1.txt" in result
     assert "--- 内容开始 ---" in result

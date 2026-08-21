@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional, Any, Dict
-from datetime import datetime
+from typing import Any
+
 from .utils import GitignoreMatcher, find_git_root, get_global_gitignore, logger
 
 
@@ -11,37 +12,40 @@ class FileNode:
     path: Path
     relative_path: str
     is_dir: bool = False
-    size: Optional[int] = None
-    modified: Optional[str] = None
-    content: Optional[str] = None
-    children: List["FileNode"] = field(default_factory=list)
+    size: int | None = None
+    modified: str | None = None
+    content: str | None = None
+    children: list["FileNode"] = field(default_factory=list)
 
-    def to_dict(self, compact: bool = False, is_root: bool = False) -> Dict[str, Any]:
+    def to_dict(self, compact: bool = False, is_root: bool = False) -> dict[str, Any]:
         """转换为字典格式，用于 JSON 序列化"""
-        
-        # 决定显示的名称：根节点统一使用 '.'，因为它表示其绝对路径已在元数据中给出。
-        display_name = "." if is_root else self.name
-        
+
+        # 决定显示的名称：根目录统一使用 '.'，顶层文件保留自身名称/相对路径
+        if is_root:
+            display_name = "." if self.is_dir else (self.relative_path or self.name)
+        else:
+            display_name = self.name
+
         if compact:
             # 紧凑模式: n (name), c (children), content (可选)
             node = {"n": display_name}
-            
+
             if self.is_dir:
                 node["c"] = [
-                    child.to_dict(compact=True, is_root=False) for child in self.children
+                    child.to_dict(compact=True, is_root=False)
+                    for child in self.children
                 ]
-            
+
             if self.content is not None:
                 node["content"] = self.content
-                
-            return node
 
+            return node
 
         # 标准模式 (json)
         node = {
-            "name": display_name, # 标准模式也使用规范化的名称
+            "name": display_name,  # 标准模式也使用规范化的名称
             "type": "dir" if self.is_dir else "file",
-            "path": self.relative_path, # 标准模式保留 path
+            "path": self.relative_path,  # 标准模式保留 path
         }
 
         metadata = {}
@@ -65,11 +69,11 @@ class Inspector:
     def __init__(
         self,
         include_hidden: bool = False,
-        ignore_patterns: List[str] = None,
-        ignore_dirs: List[str] = None,
-        max_depth: Optional[int] = None,
+        ignore_patterns: list[str] | None = None,
+        ignore_dirs: list[str] | None = None,
+        max_depth: int | None = None,
         no_gitignore: bool = False,
-        extensions: List[str] = None,
+        extensions: list[str] | None = None,
         read_all: bool = False,
         add_metadata: bool = False,
         head: int = 0,
@@ -109,7 +113,7 @@ class Inspector:
         self,
         dir_path: Path,
         base_path: Path,
-        cache: Dict[Path, FileNode],
+        cache: dict[Path, FileNode],
     ) -> FileNode:
         """递归地确保从 base_path 到 dir_path 的所有目录节点都已创建并存在于缓存中"""
         if dir_path in cache:
@@ -117,9 +121,9 @@ class Inspector:
 
         # 如果路径已经低于我们的基准路径，说明有问题或到达了根，使用基准路径的节点
         if base_path not in dir_path.parents and base_path != dir_path:
-             # This happens for paths outside the CWD, we anchor them at root.
-             return cache[base_path]
-        
+            # This happens for paths outside the CWD, we anchor them at root.
+            return cache[base_path]
+
         # 递归地确保父节点存在
         parent_path = dir_path.parent
         parent_node = self._ensure_dir_exists(parent_path, base_path, cache)
@@ -129,7 +133,7 @@ class Inspector:
             rel_path = dir_path.relative_to(base_path).as_posix()
         except ValueError:
             rel_path = dir_path.name
-            
+
         new_dir_node = FileNode(
             name=dir_path.name, path=dir_path, relative_path=rel_path, is_dir=True
         )
@@ -139,13 +143,15 @@ class Inspector:
         parent_node.children.append(new_dir_node)
         return new_dir_node
 
-    def inspect(self, paths: List[Path]) -> List[FileNode]:
+    def inspect(self, paths: list[Path]) -> list[FileNode]:
         run_base_path = Path.cwd()
-        dir_nodes_cache: Dict[Path, FileNode] = {}
+        dir_nodes_cache: dict[Path, FileNode] = {}
 
         # 虚拟根节点，它的 children 将是最终结果
         # 它的路径是 CWD，但相对路径是 '.'
-        root_node = FileNode(name=".", path=run_base_path, relative_path=".", is_dir=True)
+        root_node = FileNode(
+            name=".", path=run_base_path, relative_path=".", is_dir=True
+        )
         dir_nodes_cache[run_base_path] = root_node
 
         for path in paths:
@@ -179,21 +185,31 @@ class Inspector:
             if path.is_file():
                 if matcher.is_ignored(path):
                     continue
-                parent_node = self._ensure_dir_exists(path.parent, run_base_path, dir_nodes_cache)
+                parent_node = self._ensure_dir_exists(
+                    path.parent, run_base_path, dir_nodes_cache
+                )
                 file_node = self._process_file(path, run_base_path)
-                if file_node and not any(c.path == file_node.path for c in parent_node.children):
+                if file_node and not any(
+                    c.path == file_node.path for c in parent_node.children
+                ):
                     parent_node.children.append(file_node)
 
             elif path.is_dir():
                 dir_tree_node = self._process_dir(path, run_base_path, matcher, 0)
                 if dir_tree_node:
-                    parent_node = self._ensure_dir_exists(path.parent, run_base_path, dir_nodes_cache)
-                    
+                    parent_node = self._ensure_dir_exists(
+                        path.parent, run_base_path, dir_nodes_cache
+                    )
+
                     # 合并逻辑：如果目录节点已存在，则合并 children，否则直接添加
-                    existing_node = next((c for c in parent_node.children if c.path == path), None)
+                    existing_node = next(
+                        (c for c in parent_node.children if c.path == path), None
+                    )
                     if existing_node:
                         # 简单的合并：添加新节点中不存在的子节点
-                        existing_children_paths = {c.path for c in existing_node.children}
+                        existing_children_paths = {
+                            c.path for c in existing_node.children
+                        }
                         for new_child in dir_tree_node.children:
                             if new_child.path not in existing_children_paths:
                                 existing_node.children.append(new_child)
@@ -203,7 +219,7 @@ class Inspector:
         self._sort_children_recursive(root_node)
         return root_node.children
 
-    def _process_file(self, path: Path, base_path: Path) -> Optional[FileNode]:
+    def _process_file(self, path: Path, base_path: Path) -> FileNode | None:
         try:
             rel_path = path.relative_to(base_path).as_posix()
         except ValueError:
@@ -216,7 +232,9 @@ class Inspector:
             try:
                 stat = path.stat()
                 node.size = stat.st_size
-                node.modified = datetime.fromtimestamp(stat.st_mtime).isoformat()
+                node.modified = datetime.fromtimestamp(
+                    stat.st_mtime, tz=UTC
+                ).isoformat()
             except OSError as e:
                 logger.warning(f"无法获取元数据 {path}: {e}")
 
@@ -228,7 +246,7 @@ class Inspector:
 
     def _process_dir(
         self, path: Path, base_path: Path, matcher: GitignoreMatcher, depth: int
-    ) -> Optional[FileNode]:
+    ) -> FileNode | None:
         if self.max_depth is not None and depth > self.max_depth:
             return None
 
@@ -251,7 +269,9 @@ class Inspector:
             try:
                 stat = path.stat()
                 node.size = stat.st_size
-                node.modified = datetime.fromtimestamp(stat.st_mtime).isoformat()
+                node.modified = datetime.fromtimestamp(
+                    stat.st_mtime, tz=UTC
+                ).isoformat()
             except OSError as e:
                 logger.warning(f"无法获取元数据 {path}: {e}")
 
@@ -305,5 +325,5 @@ class Inspector:
 
         except UnicodeDecodeError:
             logger.warning(f"无法以 UTF-8 解码 {node.path}")
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"读取文件出错 {node.path}: {e}")
