@@ -13,7 +13,8 @@
 
 ## ✨ 核心特性
 
-*   **多格式输出**: 支持 `xml` (默认, 适合 LLM), `json` (适合程序处理), 和 `show` (适合人类阅读) 三种模式。
+*   **多格式输出**: 支持 `xml` (默认, 适合 LLM), `json` (适合程序处理), `compact` (紧凑 JSON), 和 `show` (适合人类阅读) 四种模式。
+*   **预设配置系统**: 支持通过 `piconfig.json` 保存常用的扫描参数和路径组合，一键调用 (`-x / --preset`)。
 *   **智能过滤**:
     *   支持标准的 Glob 通配符路径匹配。
     *   自动识别并遵循 `.gitignore` 规则（支持嵌套）。
@@ -66,6 +67,54 @@ path-inspector . --ignore-dir tests -e py -e toml --output context.xml
 path-inspector "*.log" --format show --tail 10
 ```
 
+### 使用预设配置
+一键加载预设配置执行扫描：
+
+```bash
+# 列出当前可用的预设
+path-inspector --list-presets
+
+# 使用名为 web 的预设
+path-inspector -x web
+```
+
+## ⚙️ 配置文件与预设 (Presets)
+
+Path Inspector 支持在 `piconfig.json` 中定义多个预设方案，避免重复输入冗长的命令行参数。
+
+### 配置文件优先级
+工具会按以下顺序自动查找配置文件：
+1. 命令行显式指定 (`-c / --config <path>`)
+2. 当前工作目录 (`./piconfig.json`)
+3. Git 仓库根目录 (`<git-root>/piconfig.json`)
+4. 用户配置目录 (`~/.config/path-inspector/piconfig.json` 或 `~/.piconfig.json`)
+
+### 配置示例 (`piconfig.json`)
+```json
+{
+  "presets": {
+    "default": {
+      "format": "xml",
+      "extension": ["py", "toml"],
+      "ignore_dir": [".venv", "build", "dist"]
+    },
+    "web": {
+      "paths": ["src", "public"],
+      "extension": ["ts", "tsx", "js", "vue", "css"],
+      "ignore_dir": ["node_modules", ".next", "dist"]
+    },
+    "inspect": {
+      "format": "show",
+      "extension": ["py"],
+      "head": 20
+    }
+  }
+}
+```
+
+- 当不指定 `-x` 时，默认会尝试加载名为 `default` 的预设。
+- 命令行显式传入的参数拥有更高优先级，会覆盖预设中的对应配置。
+
 ## 📖 详细用法
 
 ```text
@@ -75,7 +124,10 @@ Arguments:
   [PATHS]...  要检查的文件或目录路径，支持通配符。
 
 Options:
-  -f, --format TEXT       输出格式: xml (默认), json, show。 [default: xml]
+  -x, --preset TEXT       使用 piconfig.json 中定义的预设配置 (如 'web', 'default')。
+  -c, --config PATH       显式指定 piconfig.json 配置文件路径。
+  --list-presets          列出当前可用的所有预设并退出。
+  -f, --format TEXT       输出格式: xml (默认), json, compact, show。 [default: xml]
   -o, --output PATH       将结果写入文件而不是标准输出。
   -q, --quiet             安静模式，仅显示错误信息。
   --version               显示版本信息。
