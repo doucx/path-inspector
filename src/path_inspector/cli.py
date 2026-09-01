@@ -149,15 +149,35 @@ def main(
     # 加载配置文件与预设
     preset_kwargs = load_preset(config_file, preset)
 
-    # 命令行显式指定参数优先于预设参数
+    # 参数解析辅助函数：支持普通参数覆盖与列表参数合并
     def get_param(name: str, cli_value: Any) -> Any:
         source = ctx.get_parameter_source(name)
+        preset_val = preset_kwargs.get(name)
+
+        # 针对列表类型参数（如 extension, ignore, ignore_dir），如果两边都有值，进行合并共存
+        if name in ("extension", "ignore", "ignore_dir"):
+            resolved_preset = []
+            if preset_val:
+                if isinstance(preset_val, str):
+                    resolved_preset = [preset_val]
+                elif isinstance(preset_val, list):
+                    resolved_preset = preset_val
+
+            if source != click.core.ParameterSource.COMMANDLINE:
+                return resolved_preset if resolved_preset else cli_value
+
+            # 命令行指定了，且预设中也有值 -> 合并去重
+            if resolved_preset and cli_value:
+                combined = list(cli_value)
+                for item in resolved_preset:
+                    if item not in combined:
+                        combined.append(item)
+                return combined
+            return cli_value if cli_value is not None else resolved_preset
+
+        # 非列表参数：严格按旧逻辑（命令行显式指定优先于预设）
         if source != click.core.ParameterSource.COMMANDLINE and name in preset_kwargs:
-            val = preset_kwargs[name]
-            # 兼容单个字符串传入 list 类型的配置
-            if name in ("extension", "ignore", "ignore_dir") and isinstance(val, str):
-                return [val]
-            return val
+            return preset_val
         return cli_value
 
     format = get_param("format", format)
@@ -172,16 +192,25 @@ def main(
     head = get_param("head", head)
     tail = get_param("tail", tail)
 
-    # 处理路径：若命令行未指定，优先使用预设中配置的 paths 或 files
+    # 处理路径：解析预设中的 paths 或 files
+    preset_paths = preset_kwargs.get("paths") or preset_kwargs.get("files")
+    resolved_preset_paths = []
+    if preset_paths:
+        if isinstance(preset_paths, str):
+            resolved_preset_paths = [preset_paths]
+        elif isinstance(preset_paths, list):
+            resolved_preset_paths = preset_paths
+
     if paths is None:
-        preset_paths = preset_kwargs.get("paths") or preset_kwargs.get("files")
-        if preset_paths:
-            if isinstance(preset_paths, str):
-                paths = [preset_paths]
-            elif isinstance(preset_paths, list):
-                paths = preset_paths
-        else:
-            paths = ["."]
+        paths = resolved_preset_paths if resolved_preset_paths else ["."]
+    else:
+        # 如果命令行指定了路径，且预设中也配置了路径，则将两者合并（去重并保持顺序）
+        if resolved_preset_paths:
+            combined = list(paths)
+            for p in resolved_preset_paths:
+                if p not in combined:
+                    combined.append(p)
+            paths = combined
 
     # 参数验证
     if head > 0 and tail > 0:

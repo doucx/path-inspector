@@ -138,10 +138,66 @@ def test_cli_preset_with_paths(tmp_path, monkeypatch):
     assert "c.ts" in names
     assert "b.ts" not in names
 
-    # 2. 命令行显式指定路径覆盖预设里的 paths
+    # 2. 命令行显式指定路径与预设里的 paths 合并共存
     result_override = runner.invoke(app, ["b.ts", "-x", "cards"])
     assert result_override.exit_code == 0
     data_override = json.loads(result_override.stdout)
     names_override = [node["name"] for node in data_override["results"]]
     assert "b.ts" in names_override
-    assert "a.ts" not in names_override
+    assert "a.ts" in names_override
+    assert "c.ts" in names_override
+
+
+def test_cli_preset_paths_coexistence(tmp_path, monkeypatch):
+    """测试预设中的 paths 与命令行手写的 paths 能够共存并合并"""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "a.ts").write_text("const a = 1;", encoding="utf-8")
+    (workspace / "b.ts").write_text("const b = 2;", encoding="utf-8")
+    (workspace / "extra.ts").write_text("const extra = 3;", encoding="utf-8")
+
+    config_content = {
+        "presets": {"refactor-modules": {"format": "json", "paths": ["a.ts", "b.ts"]}}
+    }
+    (workspace / "piconfig.json").write_text(
+        json.dumps(config_content), encoding="utf-8"
+    )
+    monkeypatch.chdir(workspace)
+
+    # 运行 path-inspector 传入额外路径及预设
+    result = runner.invoke(app, ["extra.ts", "-x", "refactor-modules"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    names = [node["name"] for node in data["results"]]
+
+    # 验证命令行传入的 extra.ts 以及预设中的 a.ts, b.ts 都成功共存并被扫描
+    assert "extra.ts" in names
+    assert "a.ts" in names
+    assert "b.ts" in names
+
+
+def test_cli_preset_extension_coexistence(tmp_path, monkeypatch):
+    """测试预设中的 extension 与命令行手写的 extension 能够共存并合并"""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "a.ts").write_text("const a = 1;", encoding="utf-8")
+    (workspace / "b.py").write_text("print(b)", encoding="utf-8")
+
+    config_content = {"presets": {"web": {"format": "json", "extension": ["ts"]}}}
+    (workspace / "piconfig.json").write_text(
+        json.dumps(config_content), encoding="utf-8"
+    )
+    monkeypatch.chdir(workspace)
+
+    # 运行 path-inspector 使用预设 web（指定 extension=["ts"]）并命令行附加 -e py
+    result = runner.invoke(app, ["-x", "web", "-e", "py"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    results = data["results"][0]["children"]
+
+    a_file = next(c for c in results if c["name"] == "a.ts")
+    b_file = next(c for c in results if c["name"] == "b.py")
+
+    # 两者都应当在白名单内并成功读取了内容
+    assert a_file.get("content") == "const a = 1;"
+    assert b_file.get("content") == "print(b)"
