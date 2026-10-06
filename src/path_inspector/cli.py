@@ -1,5 +1,8 @@
 import glob
+import os
 import sys
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -51,6 +54,137 @@ def list_presets_callback(value: bool):
             info_str = f" [{'; '.join(info_parts)}]" if info_parts else ""
             typer.echo(f"  - {name}{info_str}")
         raise typer.Exit()
+
+
+@dataclass(frozen=True)
+class InspectorOptions:
+    """
+    规范化检查选项 (Parse, Don't Validate)
+    在边界将 CLI 原始参数与预设合并为强类型的领域配置。
+    """
+
+    format: str
+    all: bool
+    ignore: list[str] | None
+    ignore_dir: list[str] | None
+    max_depth: int | None
+    no_gitignore: bool
+    extension: list[str] | None
+    read_all: bool
+    add_metadata: bool
+    head: int
+    tail: int
+    paths: list[str]
+
+    @classmethod
+    def resolve(
+        cls,
+        ctx: typer.Context,
+        preset_data: dict[str, Any],
+        cli_values: dict[str, Any],
+    ) -> "InspectorOptions":
+        def is_cli_explicit(key: str) -> bool:
+            kebab = key.replace("_", "-")
+            for c in (ctx, getattr(ctx, "parent", None)):
+                if c is not None:
+                    src = c.get_parameter_source(key) or c.get_parameter_source(kebab)
+                    if src == click.core.ParameterSource.COMMANDLINE:
+                        return True
+            return False
+
+        def resolve_list(name: str, cli_val: list[str] | None) -> list[str] | None:
+            preset_raw = preset_data.get(name)
+            preset_list: list[str] = []
+            if preset_raw:
+                preset_list = (
+                    [preset_raw] if isinstance(preset_raw, str) else list(preset_raw)
+                )
+
+            if cli_val is not None:
+                if preset_list:
+                    merged = list(cli_val)
+                    for item in preset_list:
+                        if item not in merged:
+                            merged.append(item)
+                    return merged
+                return cli_val
+            return preset_list if preset_list else None
+
+        def resolve_scalar(name: str, cli_val: Any, default_val: Any) -> Any:
+            if is_cli_explicit(name):
+                return cli_val
+            if name in preset_data and cli_val == default_val:
+                return preset_data[name]
+            return cli_val
+
+        # 解析路径共存
+        preset_paths_raw = preset_data.get("paths") or preset_data.get("files")
+        preset_paths: list[str] = []
+        if preset_paths_raw:
+            preset_paths = (
+                [preset_paths_raw]
+                if isinstance(preset_paths_raw, str)
+                else list(preset_paths_raw)
+            )
+
+        raw_cli_paths = cli_values.get("paths")
+        if raw_cli_paths is None:
+            final_paths = preset_paths if preset_paths else ["."]
+        else:
+            if preset_paths:
+                combined = list(raw_cli_paths)
+                for p in preset_paths:
+                    if p not in combined:
+                        combined.append(p)
+                final_paths = combined
+            else:
+                final_paths = raw_cli_paths
+
+        return cls(
+            format=resolve_scalar("format", cli_values["format"], "xml"),
+            all=resolve_scalar("all", cli_values["all"], False),
+            ignore=resolve_list("ignore", cli_values["ignore"]),
+            ignore_dir=resolve_list("ignore_dir", cli_values["ignore_dir"]),
+            max_depth=resolve_scalar("max_depth", cli_values["max_depth"], None),
+            no_gitignore=resolve_scalar(
+                "no_gitignore", cli_values["no_gitignore"], False
+            ),
+            extension=resolve_list("extension", cli_values["extension"]),
+            read_all=resolve_scalar("read_all", cli_values["read_all"], False),
+            add_metadata=resolve_scalar(
+                "add_metadata", cli_values["add_metadata"], False
+            ),
+            head=resolve_scalar("head", cli_values["head"], 0),
+            tail=resolve_scalar("tail", cli_values["tail"], 0),
+            paths=final_paths,
+        )
+
+
+def _atomic_write(output_path: Path, render_fn) -> None:
+    """原子替换写入 (Atomic Replace via Temp File)"""
+    output_dir = output_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    temp_file_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_dir,
+            delete=False,
+            prefix=f".{output_path.name}.tmp-",
+        ) as f:
+            temp_file_name = f.name
+            render_fn(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file_name, output_path)
+    except Exception:
+        if temp_file_name and os.path.exists(temp_file_name):
+            try:
+                os.remove(temp_file_name)
+            except OSError:
+                pass
+        raise
 
 
 @app.command()
@@ -146,109 +280,43 @@ def main(
     """
     setup_logging(quiet)
 
-    # 加载配置文件与预设
     preset_kwargs = load_preset(config_file, preset)
+    cli_values = {
+        "paths": paths,
+        "format": format,
+        "all": all,
+        "ignore": ignore,
+        "ignore_dir": ignore_dir,
+        "max_depth": max_depth,
+        "no_gitignore": no_gitignore,
+        "extension": extension,
+        "read_all": read_all,
+        "add_metadata": add_metadata,
+        "head": head,
+        "tail": tail,
+    }
 
-    def is_from_cli(name: str) -> bool:
-        """检查参数是否明确来自命令行（兼容 parent context 与连字符命名）"""
-        kebab_name = name.replace("_", "-")
-        for c in (ctx, getattr(ctx, "parent", None)):
-            if c is not None:
-                src = c.get_parameter_source(name) or c.get_parameter_source(kebab_name)
-                if src == click.core.ParameterSource.COMMANDLINE:
-                    return True
-        return False
+    options = InspectorOptions.resolve(ctx, preset_kwargs, cli_values)
 
-    # 参数解析辅助函数：支持普通参数覆盖与列表参数合并
-    def get_param(name: str, cli_value: Any, default_val: Any = None) -> Any:
-        from_cli = is_from_cli(name)
-        preset_val = preset_kwargs.get(name)
-
-        # 针对列表类型参数（如 extension, ignore, ignore_dir），如果两边都有值，进行合并共存
-        if name in ("extension", "ignore", "ignore_dir"):
-            resolved_preset = []
-            if preset_val:
-                if isinstance(preset_val, str):
-                    resolved_preset = [preset_val]
-                elif isinstance(preset_val, list):
-                    resolved_preset = list(preset_val)
-
-            # 只要命令行显式提供了列表（不为 None）
-            if cli_value is not None:
-                if resolved_preset:
-                    combined = list(cli_value)
-                    for item in resolved_preset:
-                        if item not in combined:
-                            combined.append(item)
-                    return combined
-                return cli_value
-
-            # 命令行未指定，回退到预设配置
-            return resolved_preset if resolved_preset else cli_value
-
-        # 非列表参数
-        if from_cli:
-            return cli_value
-
-        if name in preset_kwargs:
-            # 命令行值未被显式修改时，使用预设配置
-            if cli_value == default_val:
-                return preset_val
-            return cli_value
-
-        return cli_value
-
-    format = get_param("format", format, "xml")
-    all = get_param("all", all, False)
-    ignore = get_param("ignore", ignore, None)
-    ignore_dir = get_param("ignore_dir", ignore_dir, None)
-    max_depth = get_param("max_depth", max_depth, None)
-    no_gitignore = get_param("no_gitignore", no_gitignore, False)
-    extension = get_param("extension", extension, None)
-    read_all = get_param("read_all", read_all, False)
-    add_metadata = get_param("add_metadata", add_metadata, False)
-    head = get_param("head", head, 0)
-    tail = get_param("tail", tail, 0)
-
-    # 处理路径：解析预设中的 paths 或 files
-    preset_paths = preset_kwargs.get("paths") or preset_kwargs.get("files")
-    resolved_preset_paths = []
-    if preset_paths:
-        if isinstance(preset_paths, str):
-            resolved_preset_paths = [preset_paths]
-        elif isinstance(preset_paths, list):
-            resolved_preset_paths = preset_paths
-
-    if paths is None:
-        paths = resolved_preset_paths if resolved_preset_paths else ["."]
-    else:
-        # 如果命令行指定了路径，且预设中也配置了路径，则将两者合并（去重并保持顺序）
-        if resolved_preset_paths:
-            combined = list(paths)
-            for p in resolved_preset_paths:
-                if p not in combined:
-                    combined.append(p)
-            paths = combined
-
-    # 参数验证
-    if head > 0 and tail > 0:
+    # 参数校验
+    if options.head > 0 and options.tail > 0:
         typer.secho(
             "错误: 不能同时指定 --head 和 --tail。", fg=typer.colors.RED, err=True
         )
         raise typer.Exit(1)
 
     valid_formats = ["xml", "json", "compact", "show"]
-    if format not in valid_formats:
+    if options.format not in valid_formats:
         typer.secho(
-            f"错误: 格式 '{format}' 无效。可用格式: {', '.join(valid_formats)}",
+            f"错误: 格式 '{options.format}' 无效。可用格式: {', '.join(valid_formats)}",
             fg=typer.colors.RED,
             err=True,
         )
         raise typer.Exit(1)
 
-    # 路径解析 (处理通配符)
-    resolved_paths = []
-    for p_str in paths:
+    # 路径通配符解析
+    resolved_paths: list[Path] = []
+    for p_str in options.paths:
         matches = list(glob.glob(p_str, recursive=True))
         if not matches:
             resolved_paths.append(Path(p_str))
@@ -259,21 +327,19 @@ def main(
         typer.secho("未找到匹配的路径。", fg=typer.colors.YELLOW, err=True)
         return
 
-    # 初始化检查器
     inspector = Inspector(
-        include_hidden=all,
-        ignore_patterns=ignore,
-        ignore_dirs=ignore_dir,
-        max_depth=max_depth,
-        no_gitignore=no_gitignore,
-        extensions=extension,
-        read_all=read_all,
-        add_metadata=add_metadata,
-        head=head,
-        tail=tail,
+        include_hidden=options.all,
+        ignore_patterns=options.ignore,
+        ignore_dirs=options.ignore_dir,
+        max_depth=options.max_depth,
+        no_gitignore=options.no_gitignore,
+        extensions=options.extension,
+        read_all=options.read_all,
+        add_metadata=options.add_metadata,
+        head=options.head,
+        tail=options.tail,
     )
 
-    # 执行扫描
     logger.info("开始扫描...")
     try:
         nodes = inspector.inspect(resolved_paths)
@@ -281,22 +347,16 @@ def main(
         logger.error(f"扫描过程中发生错误: {e}")
         raise typer.Exit(1)
 
-    # 渲染输出
-    renderer = get_renderer(format)
-
+    renderer = get_renderer(options.format)
     cwd = Path.cwd()
-    absolute_path_meta = str(cwd.resolve())
-    git_root = find_git_root(cwd)
-
     render_kwargs = {
-        "absolute_path": absolute_path_meta,
-        "repository_root": str(git_root) if git_root else None,
+        "absolute_path": str(cwd.resolve()),
+        "repository_root": str(find_git_root(cwd)) if find_git_root(cwd) else None,
     }
 
     try:
         if output:
-            with open(output, "w", encoding="utf-8") as f:
-                renderer.render(nodes, f, **render_kwargs)
+            _atomic_write(output, lambda f: renderer.render(nodes, f, **render_kwargs))
             if not quiet:
                 typer.secho(f"结果已写入: {output}", fg=typer.colors.GREEN)
         else:
