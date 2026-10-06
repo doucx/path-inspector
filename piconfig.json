@@ -1,0 +1,9 @@
+{
+  "presets": {
+    "full": {
+      "format": "xml",
+      "extension": ["py", "toml"],
+      "paths": ["."]
+    }
+  }
+}
