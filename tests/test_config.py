@@ -201,3 +201,40 @@ def test_cli_preset_extension_coexistence(tmp_path, monkeypatch):
     # 两者都应当在白名单内并成功读取了内容
     assert a_file.get("content") == "const a = 1;"
     assert b_file.get("content") == "print(b)"
+
+
+def test_cli_preset_ignore_dir_coexistence(tmp_path, monkeypatch):
+    """测试预设中的 ignore_dir 与命令行手写的 --ignore-dir 能够共存并合并"""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "dir1").mkdir()
+    (workspace / "dir1" / "f1.txt").write_text("1", encoding="utf-8")
+    (workspace / "dir2").mkdir()
+    (workspace / "dir2" / "f2.txt").write_text("2", encoding="utf-8")
+    (workspace / "keep").mkdir()
+    (workspace / "keep" / "f3.txt").write_text("3", encoding="utf-8")
+
+    config_content = {
+        "presets": {
+            "test_ignore": {
+                "format": "json",
+                "ignore_dir": ["dir1"],
+            }
+        }
+    }
+    (workspace / "piconfig.json").write_text(
+        json.dumps(config_content), encoding="utf-8"
+    )
+    monkeypatch.chdir(workspace)
+
+    # 运行并在命令行附加 --ignore-dir dir2
+    result = runner.invoke(app, [".", "-x", "test_ignore", "--ignore-dir", "dir2"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    children = data["results"][0]["children"]
+    names = [c["name"] for c in children]
+
+    # dir1 (来自预设) 和 dir2 (来自命令行) 都应被忽略，仅保留 keep
+    assert "dir1" not in names
+    assert "dir2" not in names
+    assert "keep" in names

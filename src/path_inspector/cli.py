@@ -149,9 +149,19 @@ def main(
     # 加载配置文件与预设
     preset_kwargs = load_preset(config_file, preset)
 
+    def is_from_cli(name: str) -> bool:
+        """检查参数是否明确来自命令行（兼容 parent context 与连字符命名）"""
+        kebab_name = name.replace("_", "-")
+        for c in (ctx, getattr(ctx, "parent", None)):
+            if c is not None:
+                src = c.get_parameter_source(name) or c.get_parameter_source(kebab_name)
+                if src == click.core.ParameterSource.COMMANDLINE:
+                    return True
+        return False
+
     # 参数解析辅助函数：支持普通参数覆盖与列表参数合并
-    def get_param(name: str, cli_value: Any) -> Any:
-        source = ctx.get_parameter_source(name)
+    def get_param(name: str, cli_value: Any, default_val: Any = None) -> Any:
+        from_cli = is_from_cli(name)
         preset_val = preset_kwargs.get(name)
 
         # 针对列表类型参数（如 extension, ignore, ignore_dir），如果两边都有值，进行合并共存
@@ -161,36 +171,44 @@ def main(
                 if isinstance(preset_val, str):
                     resolved_preset = [preset_val]
                 elif isinstance(preset_val, list):
-                    resolved_preset = preset_val
+                    resolved_preset = list(preset_val)
 
-            if source != click.core.ParameterSource.COMMANDLINE:
-                return resolved_preset if resolved_preset else cli_value
+            # 只要命令行显式提供了列表（不为 None）
+            if cli_value is not None:
+                if resolved_preset:
+                    combined = list(cli_value)
+                    for item in resolved_preset:
+                        if item not in combined:
+                            combined.append(item)
+                    return combined
+                return cli_value
 
-            # 命令行指定了，且预设中也有值 -> 合并去重
-            if resolved_preset and cli_value:
-                combined = list(cli_value)
-                for item in resolved_preset:
-                    if item not in combined:
-                        combined.append(item)
-                return combined
-            return cli_value if cli_value is not None else resolved_preset
+            # 命令行未指定，回退到预设配置
+            return resolved_preset if resolved_preset else cli_value
 
-        # 非列表参数：严格按旧逻辑（命令行显式指定优先于预设）
-        if source != click.core.ParameterSource.COMMANDLINE and name in preset_kwargs:
-            return preset_val
+        # 非列表参数
+        if from_cli:
+            return cli_value
+
+        if name in preset_kwargs:
+            # 命令行值未被显式修改时，使用预设配置
+            if cli_value == default_val:
+                return preset_val
+            return cli_value
+
         return cli_value
 
-    format = get_param("format", format)
-    all = get_param("all", all)
-    ignore = get_param("ignore", ignore)
-    ignore_dir = get_param("ignore_dir", ignore_dir)
-    max_depth = get_param("max_depth", max_depth)
-    no_gitignore = get_param("no_gitignore", no_gitignore)
-    extension = get_param("extension", extension)
-    read_all = get_param("read_all", read_all)
-    add_metadata = get_param("add_metadata", add_metadata)
-    head = get_param("head", head)
-    tail = get_param("tail", tail)
+    format = get_param("format", format, "xml")
+    all = get_param("all", all, False)
+    ignore = get_param("ignore", ignore, None)
+    ignore_dir = get_param("ignore_dir", ignore_dir, None)
+    max_depth = get_param("max_depth", max_depth, None)
+    no_gitignore = get_param("no_gitignore", no_gitignore, False)
+    extension = get_param("extension", extension, None)
+    read_all = get_param("read_all", read_all, False)
+    add_metadata = get_param("add_metadata", add_metadata, False)
+    head = get_param("head", head, 0)
+    tail = get_param("tail", tail, 0)
 
     # 处理路径：解析预设中的 paths 或 files
     preset_paths = preset_kwargs.get("paths") or preset_kwargs.get("files")
